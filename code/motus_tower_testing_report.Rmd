@@ -20,19 +20,28 @@ library(lubridate)
 # visualize and analyze ----
 
 df_bearings_dist_ctt <- readRDS(here("data/all_pings_distance_bearing")) %>% 
-  filter(mfg == "CTT", ) %>% 
+  filter(mfg == "CTT") %>% 
   mutate(dist.group = case_when(ant.tag.distance < 2000 ~ "close",
                                 ant.tag.distance > 2000 ~ "far"),
          detected = ifelse(is.na(sig), 0, 1),
          detected.label = ifelse(is.na(sig), "Interpolated", "Detected"))
 
-
-
 ```
+# Introduction
+
+Audubon Canyon Ranch has installed 2 Motus (motus.org) towers at our preserves on Tomales Bay for a study of shorebird migration timing and overwinter movements. Prior to deploying numbers of tags on birds, we wanted to test the towers to determine two key factors: 
+1. To what extent to does the signal strength received by Motus towers reflect the distance between the tag and tower? and 
+2. To what extent is the probability a tag is detected determined by the distance from tag to tower and the difference in angle between tag-tower bearing and the direction each antenna is oriented?
 
 # Methods  
+
+## Tower details
+
+CTT only - David please fill in brief tower specs here: model name/number, antenna types, heights, directions. Is there an output table from Motus that would suffice?
+
 ## Tag details  
-CTT only - David please fill in brief tag specs here: model name/number, nominal signal transmission interval.  
+
+CTT only - David please fill in brief tag specs here: model name/number, nominal signal transmission interval (is it really 14.8 sec for CTT??).  
 
 ## Drone flights
 
@@ -40,19 +49,17 @@ We used DJI Matrise 100 UAVs for all test flights. We attached the tag in a vert
 
 We did test flights at three locations along Tomales Bay: at the Cypress Grove and Toms Point Motus towers (Figure 1) we programmed the UAV's to fly a creeping line or parallel pattern, covering a 1 km radius circle centered at each tower. We programmed the parallel paths to be spaced 400 m apart, and the UAV to fly at 5 m/s and 50 m above the surface. We also flew 1-3 manual flights at ~ 10 m above the surface over specific areas of interest for our study at two locations: Cypress Grove and Walker Creek. The flights at Walker Creek were intentionally out of the line of sight for both towers. For all flights we collected UAV location data at > 1 hz.  
 
-
 ## Data processing  
 
-A primary objective of this testing was to estimate the probability of a tag signal being detected as a function of distance from the Motus tower and the difference in bearing from tower to tag off the axis of each antenna. Thus we needed to identify any instances where a tag signal was expected but not detected, and add these interpollated signals back into the dataset. The tag was transmitting signal continuously during the test period, but the UAVs were flying in distinct flights lasting ~15 minutes according to battery life. We wanted to exclude tag signals detected between flights when batteries were exchanged. Grouping the tag signal data by UAV flight provided a convenient way to interpolate missed signals. We identified four types of missed tag signal that required slightly different interpollation methods: 1) signals transmitted after the start of the UAV flight but before the first detected signal; 2) signals transmitted between the first and last detected signals; 3) signals transmitted after the last detected signal but before the end of the flight; and 4) no signals were detected during the entire flight. For each of these types, we interpollated missed signals as occuring on a 14.8 sec interval, which was the average interval of detected signals in our data once we filtered to intervals 13 < x < 16 sec. This interpollation process was repeated for each antenna on each tower. Full details and code for our interpollation methods can be found in Appendix A : Data processing.  
+We needed to identify any instances where a tag signal was expected but not detected and add these interpolated signals back into the dataset. The UAV location data were stored as distinct flights ~15 minutes corresponding to battery life. For each UAV flight, we identified four types of missed tag signal that required slightly different interpolation methods: 1) signals transmitted after the start of the UAV flight but before the first detected signal; 2) signals transmitted between the first and last detected signals; 3) signals transmitted after the last detected signal but before the end of the flight; and 4) no signals were detected during the entire flight. For each of these types, we interpolated missed signals as occurring on a 14.8 sec interval, which was the average interval of detected signals in our data once we filtered to intervals 13 < x < 16 sec. This interpolation process was repeated for each antenna on each tower. Full details and code for our interpolation methods can be found in Appendix A : Data processing.  
 
-Once missed signals were interpollated, we attributed each signal to the appropriate UAV location. We then calculated the distance and bearing between tag and tower for each signal (see Appendix a: Data processing for further detail). We then calculated the tag bearing off the axis of each antenna as the difference between the bearing of the antenna axis and the tag-tower bearing. We assumed that there would be no difference in signal detectability to the left vs right of the antenna axis, so we converted the tag bearing off antenna axis to the scale 0-180.  
+Once missed signals were interpolated, we attributed each signal to the appropriate UAV location. We then calculated the distance and bearing between tag and tower for each signal (see Appendix A Data processing for further detail). We then calculated the tag bearing off the axis of each antenna as the difference between the bearing of the antenna axis and the tag-tower bearing. We assumed that there would be no difference in signal detectability to the left vs right of the antenna axis, so we converted the tag bearing off antenna axis to the scale 0-180.  
 
 ## Analysis and visualization  
 
-We first visually examing patterns in signal strength and detected/missed signal the raw data by plotting tag signals 1) along the mapped UAV flight path, and 2) as a function of distance and bearing off antenna axis.  
+We first visually examined patterns in signal strength and detected/missed signal in the raw data by plotting tag signals 1) along the mapped UAV flight path, and 2) as a function of distance and bearing off antenna axis.  
 
-To generalize our results, we also fitted some simple linear models and generalized linear models to evaluate signal strength and detection probability, respectively, as a function of distance and bearing off antenna axis. We restricted this analysis to just the programmed-route flights done in each tower circle (excluding low altitude, manual flights at Cypress Grove and Walker Creek). We separated the data into "close" and "far" subsets and analyzed these subsets separately, because of the large gap with no data in the middle of our observed distance range (Figure 2). For each data subset (close and far) and each response variable (signal strength and detection probability) we fitted models with the interaction and additive effects of distance and tag bearing off antenna axis, the single main effects of these variables, and the intercept only model. We pooled detections across all antennae, and did not attempt to account for differences in detectability between antennae. We determined relative support for each model by comparing AICc values, and for supported models we extracted coefficient estimates and 95% Confidence Intervals to judge coefficient importance and strength in predicting response variables. We also used the best supported models to create estimated signal strength and detection probability surfaces across the distances and angles in our data.  
-
+To generalize our results, we also fitted some simple linear models and generalized linear models to evaluate signal strength and detection probability, respectively, as a function of distance and bearing off antenna axis. We restricted this analysis to just the programmed-route flights done in each tower circle (excluding low altitude, manual flights at Cypress Grove and Walker Creek). Both towers detected tag signals from flights at both places, so the detection data had a large gap with no data in the middle of our observed distance range (Figure 2). Thus, we separated the data into "close" and "far" subsets and analyzed these subsets separately. For each distance subset and each response variable (signal strength and detection probability) we fitted models with the interaction and additive effects of distance and tag bearing off antenna axis, the single main effects of these variables, and the intercept only model. We pooled detections across all antennae, and did not attempt to account for differences in detectability between antennae. We determined relative support for each model by comparing AICc values, and for supported models we extracted coefficient estimates and 95% Confidence Intervals to judge coefficient importance and strength in predicting response variables. We also used the best supported models to create estimated signal strength and detection probability surfaces across the distances and angles in our data.  
 
 # Results and Discussion  
 ## Summarize and visualize raw data  
@@ -65,8 +72,6 @@ flight_summ <- readRDS(here("data/drone_flight_times_antennae")) %>%
                                 date == "2021-09-15" ~ "Toms Point"),
          flight.type = ifelse(flight.height == "high", "P", "M")) %>% 
   distinct(date, flight.num, flight.type, flight.loc, flight.length)
-
-
 
 detect_summary <- df_bearings_dist_ctt %>% 
   count(date, drone, flight.num, name, antBearing, detected.label) %>% 
@@ -83,9 +88,7 @@ detec_flight_summary <- full_join(flight_summ, detect_summary) %>%
 
 ```
 
-
-We conducted a total of eight programmed-route flgihts and four ad hoc flights between 0900-1300 hours on 14 and 15 Sept, 2021. Among these flights we detected a total of 3175 transmitted signals, and we interpollated another 1237 missed signals (Table 1).  
-
+We conducted a total of eight programmed-route flights and four ad hoc flights between 0900-1300 hours on 14 and 15 Sept, 2021. Among these flights we detected a total of 3175 transmitted signals, and we interpolated another 1237 missed signals (Table 1).  
 
 Table 1. Summary of UAV testing of Motus receiver detection rates on Tomales Bay, CA, 2021. Shown are flight characteristics and number of tag signals per antenna at each of two Motus towers (towers identified by the direction they point). Flight types are P = Programmed, M = Manual. For tag signals, values are Total (Detected; Interpolated).  
 ```{r}
@@ -94,7 +97,6 @@ detec_flight_summary <- detec_flight_summary %>%
   mutate(filler.col1 = "",
          filler.col2 = "") %>% 
   select(date, flight.length, flight.loc, flight.type, filler.col1, contains("Cypress"), filler.col2, contains("Toms"))
-
 
 colnames(detec_flight_summary) <- gsub("Cypress Grove; ", "", colnames(detec_flight_summary))
 colnames(detec_flight_summary) <- gsub("Toms Point; ", "", colnames(detec_flight_summary))
@@ -116,12 +118,11 @@ flextable(detec_flight_summary) %>%
   border(i = 1, border.top = fp_border(color = "black"), part = "body") %>% 
   border(i = nrow(detec_flight_summary), border.bottom = fp_border(color = "black"), part = "body") %>% 
   #width(j = 2:4, width = 1) %>% 
-  #width(j = 6:9, width = 2) %>% 
-  #width(j = 11:14, width = 2) %>% 
+  width(j = 6:9, width = 1) %>% 
+  width(j = 11:14, width = 1) %>% 
   autofit() %>% 
   fit_to_width(max_width = 8)
 ```
-
 
 In examining detections as a function of distance and bearing off the antenna axis, we found somewhat predictable patterns of signal strength (Figure 2). Signal strength was greatest close the the tower and along bearings nearer the axis of the antenna. We also found fairly expected patterns in whether or not a signal was detected. Most tag signals were detected when the UAV was flying within approximately 1,800 m of a tower, and there was little effect of bearing off antenna axis at these distances. However, at distances between approximately 5,200-7,800 m, the bearing off antenna axis began to have a stronger effect on detectability. This effect of bearing off antenna axis was somewhat more apparent for antennae mounted on the Cypress Grove tower; whereas detectability was more constant across bearings for Toms Point antennae.   
 
@@ -130,6 +131,7 @@ We found encouraging results in the raw data plot for flights done at Walker Cre
 
 
 Figure 2. Raw detections collected during UAV testing of Motus receivers on Tomales Bay, CA, 2021. Shown are detected and interpolated signals by a UAV-mounted tag flown in a series of flights at three locations. Signals are separated by the tower at which they were detected (or interpolated for) and by the location of the flight (see Figure 1). The blue scale indicates signal strength, and red indicates interpolated signals.  
+
 ```{r fig.dim = c(8, 6)}
 
 # figure 2
@@ -147,13 +149,17 @@ ggplot() +
 
 ```
 
-```{r}
+```{r message = TRUE}
 # analyze ----
 
 # model selection
 
 model_data <- df_bearings_dist_ctt %>% 
-  filter(flight.loc != "Walker Creek")
+  full_join(., readRDS(here("data/drone_flight_times_antennae")) %>% 
+              distinct(date, drone, flight.num, flight.height)) %>%
+  filter(flight.loc != "Walker Creek", flight.height == "high") %>% 
+  mutate(tag.ant.bearing.dif = scale(tag.ant.bearing.dif),
+         ant.tag.distance = scale(ant.tag.distance))
 
 zmodnames = c("Distance * Bearing", "Distance + Bearing", "Distance", "Bearing", "Intercept only")
 
@@ -173,16 +179,13 @@ sig.str.close <- list(dist.bear = model_data %>%
                         filter(dist.group == "close", !is.na(sig)) %>%
                         lm(sig ~ 1, data = .))
 
-
 sig.str.close.aic <- aictab(sig.str.close, modnames = zmodnames) %>% 
   data.frame()  %>% 
   select(Modnames, K, AICc, Delta_AICc, AICcWt, LL) %>% 
   mutate(across(c("AICc", "Delta_AICc", "AICcWt", "LL"), ~round(.x, 2)))
 
-
-
 sig.str.far <- list(dist.bear = model_data %>%
-                        filter(dist.group == "far", !is.na(sig)) %>%
+                        filter(dist.group == "far", !is.na(sig)) %>% 
                         lm(sig ~ ant.tag.distance * tag.ant.bearing.dif, data = .),
                       dist_bear = model_data %>%
                         filter(dist.group == "far", !is.na(sig)) %>%
@@ -197,13 +200,10 @@ sig.str.far <- list(dist.bear = model_data %>%
                         filter(dist.group == "far", !is.na(sig)) %>%
                         lm(sig ~ 1, data = .))
 
-
 sig.str.far.aic <- aictab(sig.str.far, modnames = zmodnames) %>% 
   data.frame()  %>% 
   select(Modnames, K, AICc, Delta_AICc, AICcWt, LL) %>% 
   mutate(across(c("AICc", "Delta_AICc", "AICcWt", "LL"), ~round(.x, 2)))
-
-
 
 # 2 chance of detection
 
@@ -223,13 +223,10 @@ detec.close <- list(dist.bear = model_data %>%
                     filter(dist.group == "close") %>%
                     glm(detected ~ 1, data = ., family = binomial))
 
-
 detec.close.aic <- aictab(detec.close, modnames = zmodnames) %>% 
   data.frame()  %>% 
   select(Modnames, K, AICc, Delta_AICc, AICcWt, LL) %>% 
   mutate(across(c("AICc", "Delta_AICc", "AICcWt", "LL"), ~round(.x, 2)))
-
-
 
 detec.far <- list(dist.bear = model_data %>%
                     filter(dist.group == "far") %>%
@@ -247,13 +244,10 @@ detec.far <- list(dist.bear = model_data %>%
                     filter(dist.group == "far") %>%
                     glm(detected ~ 1, data = ., family = binomial))
 
-
 detec.far.aic <- aictab(detec.far, modnames = zmodnames) %>% 
   data.frame() %>% 
   select(Modnames, K, AICc, Delta_AICc, AICcWt, LL) %>% 
   mutate(across(c("AICc", "Delta_AICc", "AICcWt", "LL"), ~round(.x, 2)))
-
-
 
 all_aic <- rbind(data.frame(Modnames = "Signal strength, close detections", K = "", AICc = "", Delta_AICc = "", AICcWt = "", LL = ""),
                  sig.str.close.aic, 
@@ -265,12 +259,11 @@ all_aic <- rbind(data.frame(Modnames = "Signal strength, close detections", K = 
                  detec.far.aic)
 ```
 
-
 ## Models  
 
-In comparing support for the candidate models, the structure with the interaction between distance and bearing off antenna axis was best supported across all four subsets of the data (close and far distances for signal strength and detection probability responses). Additionally for all four data subsets, the `r\u0394` AICc values for second ranked models were large (but see detection probability, far), so we base inference on the best supported model in each subset only.  
+In comparing support for the candidate models, the structure with the interaction between distance and bearing off antenna axis was best supported across all four subsets of the data (close and far distances for signal strength and detection probability responses). For the signal strength, close and detection probability, far data subsets, the <U+0394> AICc values for second ranked models were large. While we could have considered coefficient estimates multiple models for the , so we base inference on the best supported model in each subset only.  
 
-Table 2. Model selection results for UAV testing of Motus receiver detection rates on Tomales Bay, CA, 2021. Model selection was done separately for each of four data subsets, indicated by the subheadings. K is the number of model parameters, AICc is the Akaiki Information Criterion value corrected for small sample size, `r\u0394` AICc is the difference in AICc value between the current model and the one with the lowest AICc value, AICc Wt. is the AICc model weight, and ln(likelihood) is the log-transformed maximized likelihood for each model.  
+Table 2. Model selection results for UAV testing of Motus receiver detection rates on Tomales Bay, CA, 2021. Model selection was done separately for each of four data subsets, indicated by the subheadings. K is the number of model parameters, AICc is the Akaiki Information Criterion value corrected for small sample size, <U+0394> AICc is the difference in AICc value between the current model and the one with the lowest AICc value, AICc Wt. is the AICc model weight, and ln(likelihood) is the log-transformed maximized likelihood for each model.  
 ```{r}
 subtab.nrow = nrow(detec.close.aic)
 flextable(all_aic) %>% 
@@ -304,6 +297,7 @@ flextable(all_aic) %>%
 
 The estimates and 95% confidence intervals for coefficients in the best supported models, and the predicted detection surfaces derived from those models, generally support our qualitative conclusions drawn from the plotted raw data. In general, we found a negative relationship between distance from tower and both signal strength and detection probability (Table 2, Figure 3). We also generally found a negative relationship between bearing off antenna axis and signal strength, but this relationship was less well supported for detection probability (i.e. 95% CI overlapping 0).  
 
+Table 3. Coefficient estimates for the best supported models predicting Motus receiver detection rates on Tomales Bay, CA, 2021. Models were fitted to each of four data subsets, indicated by the subheadings, based on response variable (Signal strength or Detection Probability) and distance between tag and tower (close: 0-1200m or far: 5300-7600m).  
 
 ```{r}
 # best model coefs and CI
@@ -329,7 +323,6 @@ all_ci_coef <- map2_df(list(sig.str.close$dist.bear, sig.str.far$dist.bear, dete
          model = ifelse(coef == "Distance", model, "")) %>% 
   select(model, coef, est, X2.5.., X97.5..)
 
-
 flextable(all_ci_coef) %>% 
   set_header_labels("model" = "Data subset",
                     "coef" = "Coefficient",
@@ -346,8 +339,6 @@ flextable(all_ci_coef) %>%
   width(j = 1:2, width = 2) %>% 
   align(j = 3:5, align = "center", part = "all")
 
-
-
 ```
 
 
@@ -355,7 +346,6 @@ flextable(all_ci_coef) %>%
 ```{r}
 # model estimates for probability of detection
 # using only the non-walker creek flights/models: detec.wcf.close and detec.wcf.far
-
 
 # close and far newdats
 close_newdat <- expand.grid(ant.tag.distance = seq(min(filter(model_data, dist.group == "close")$ant.tag.distance),
@@ -368,7 +358,6 @@ far_newdat <- expand.grid(ant.tag.distance = seq(min(filter(model_data, dist.gro
                                                  length.out = 100),
                           tag.ant.bearing.dif = seq(0, 180, length.out = 100))
 
-
 # signal strength predictions
 # close
 sig.str.close_pred <- predict(sig.str.close$dist.bear, close_newdat) %>% 
@@ -380,21 +369,21 @@ sig.str.far_pred <- predict(sig.str.far$dist.bear, far_newdat) %>%
   cbind(far_newdat) %>% 
   rename(sig.str = 1)
 
-
 # detection probability predictions
 # close
 detec.close_pred <- predict.glm(detec.close$dist.bear, close_newdat, type = "response") %>% 
   cbind(close_newdat) %>% 
   rename(detec.prob = 1)
 
-
-
 # far
 detec.far_pred <- predict.glm(detec.far$dist.bear, far_newdat, type = "response") %>% 
   cbind(far_newdat) %>% 
   rename(detec.prob = 1)
-```
 
+```
+  
+  
+Figure 3. Predicted Motus receiver detection rates on Tomales Bay, CA, 2021. Predictions are from best supported models, fitted to each of four data subsets, indicated by the subheadings, based on response variable (Signal strength or Detection Probability) and distance between tag and tower (close: 0-1200m or far: 5300-7600m).  
 
 ```{r}
 # plots
@@ -409,7 +398,6 @@ ggplot() +
   scale_x_continuous(limits = c(0,360), breaks = seq(0, 180, by = 30), labels = seq(0, 180, by = 30))
 ```
 
-
 ```{r}
 ggplot() +
   geom_contour_filled(data = sig.str.far_pred, aes(tag.ant.bearing.dif, ant.tag.distance, z = sig.str), binwidth = 10) +
@@ -419,9 +407,9 @@ ggplot() +
   scale_fill_brewer(palette = "Blues", name = "Predicted\nsignal\nstrength", direction=-1, guide = guide_legend(reverse = TRUE)) +
   theme_bw() +
   coord_polar() +
-  scale_x_continuous(limits = c(0,360), breaks = seq(0, 180, by = 30), labels = seq(0, 180, by = 30))
+  scale_x_continuous(limits = c(0,360), breaks = seq(0, 180, by = 30), labels = seq(0, 180, by = 30)) +
+  scale_y_continuous(limits = c(0, max(sig.str.far_pred$ant.tag.distance * 1.1), breaks = seq(0, max(sig.str.far_pred$ant.tag.distance * 1.1), by = 1000), labels = seq(0, max(sig.str.far_pred$ant.tag.distance * 1.1), by = 1000)))
 ```
-
 
 ```{r}
 
@@ -438,12 +426,12 @@ ggplot() +
 
 ```
 
-
 ```{r}
 ggplot() +
   geom_contour_filled(data = detec.far_pred, aes(tag.ant.bearing.dif, ant.tag.distance, z = detec.prob)) +
   coord_polar() +
   scale_x_continuous(limits = c(0,360), breaks = seq(0, 180, by = 30), labels = seq(0, 180, by = 30)) +
+  scale_y_continuous(limits = c(0, max(sig.str.far_pred$ant.tag.distance * 1.1), breaks = seq(0, max(sig.str.far_pred$ant.tag.distance * 1.1), by = 1000), labels = seq(0, max(sig.str.far_pred$ant.tag.distance * 1.1), by = 1000))) +
   labs(x = "",
        y = "Tag distance from tower (m)",
        title = "Detection probability, far") +
@@ -452,4 +440,10 @@ ggplot() +
   theme_bw()
 ```
 
+# Conclusions
+ 
+Overall, our test flights revealed encouraging results for the use of 1-3 Motus towers to detect and monitor tagged animal activity in a habitat feature the size and shape of Tomales Bay. We found that tag detection probability was somewhat strongly affected by bearing off the antenna axis at distances between approximately 5.3-7.6 km. However, towers with 4-5 antennae set at equal bearings will effectively eliminate the zones of poorer detection behind individual antennae. Our results suggest that if a tagged animal passes within 6 km (approximately median of our "far" distances) of one of the towers we've placed on Tomales Bay (where ? the maximum angle between antennae is ~55 degrees), there is = 73% chance that each signal will be detected. At distances greater than 7.5 km (near our maximum "far" distances), this figure falls to 33%. Thus, if one in three transmitted signals are detected at these larger distances, and with signal transmission frequency around 15 hz, we might expect hypothetical tagged animals passing within 7.5 km for = 60 seconds (yielding = 3 transmitted signals) to be detected most of the time.  
 
+We also found possibly encouraging results regarding the relationships between signal strength and distance from tag to antenna (while accounting for bearing off antenna axis). The data we collected were somewhat limited in diversity of motus tower configurations and range of distances between tag and tower. However, our results suggest it may be possible to derive rough estimates of animal location from signal strength as detected by multiple antennae on a single tower or multiple towers.  
+
+The data we collected are not sufficient to fully evaluate tag detections across the full range of distances we evaluated, nor were we able to establish the farthest distance a tag might be detected by our towers. Furthermore, our test flights were mostly at 50m above the surface. We did not thoroughly test detectability at other heights. For future testing, we suggest additional flights across a broader range of distances and heights, as well as tests specific to the behaviors of prospective study animals for particular research questions.
