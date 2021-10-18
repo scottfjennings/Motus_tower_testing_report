@@ -1,33 +1,33 @@
 ---
 title: ''
-output: word_document
+output:
+  word_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 ```
 
 
 
 ```{r }
 
-library(motus)
-library(DBI)
-library(RSQLite)
 library(tidyverse)
 library(lubridate)
-library(fuzzyjoin)
 library(here)
-library(data.table)
 library(geosphere)
+library(data.table)
+
 
 options(scipen = 999)
+
 ```
 
 
-
-
-## Import drone telemetry data then calculate the mean possition for each second.
+# First load data and do some minor management.
+## Drone data
+The drone telemetry data has 1-11 locations per second. We only need 1 location per second, so then calculate the mean position for each second.
 
 ```{r }
 drone_tele_tags <- readRDS(here("data/combined_drone_telemetry")) %>% 
@@ -46,20 +46,22 @@ drone_tele_tags1sec<- drone_tele_tags %>%
                                 date == "2021-09-15" ~ "Toms Point"))
 head(drone_tele_tags1sec)
 ```
-# load Motus data
+# Motus data
 
 ```{r}
-all_tags_tower <- readRDS(here("data/combined_by_tower"))
+all_tags_tower <- readRDS(here("data/combined_by_tower")) %>% 
+  select(ts, sig, motusTagID, recv, antBearing, date, mfg)
 
 ```
 
 
-## Interpolate missed pings ----
-For each flight X antenna combo, one or more pings might have been missed 1) after the flight began but before the first detected ping, 2) anywhere between the first and last detected ping, 3) after the last detected ping but before the flight ended, or 4) an entire flight X antenna combo might have no detected pings
+Interpolate missed pings.  
+
+For each flight X antenna combo, one or more pings might have been missed: 1) after the flight began but before the first detected ping, 2) anywhere between the first and last detected ping, 3) after the last detected ping but before the flight ended, or 4) an entire flight X antenna combo might have no detected pings
 There is slightly different logic for interpolating these different potential missed pings; they must be interpolated separately then joined
 
-# First generate df representing start and end times for each drone duplicated for each antenna
-ctt: 8 antennae * 12 flights = total 96 expected flight X antenna combinations
+First generate df representing start and end times for each drone flight duplicated for each antenna.  
+ctt: 8 antennae * 12 flights = total 96 expected flight X antenna combinations.  
 
 
 ```{r}
@@ -83,7 +85,7 @@ Combine flight X antenna info with detections for each antenna
 ```{r}
 flights_antennae_detections <- all_tags_tower %>% 
   full_join(., drone_flight_times_antennae) %>% 
-  filter(between(ts, start.time, end.time)) %>% 
+  filter(data.table::between(ts, start.time, end.time)) %>% # just tower detections during drone flights
   group_by(date, mfg, antBearing, drone, flight.num) %>% 
   summarise(detected.pings = n())%>% 
   ungroup() %>% 
@@ -91,14 +93,17 @@ flights_antennae_detections <- all_tags_tower %>%
   mutate(detected.pings = ifelse(is.na(detected.pings), 0, detected.pings)) %>% 
   full_join(distinct(all_tags_tower, recv, antBearing)) %>% 
   arrange(antBearing, date, drone, flight.num)
+
 ```
 
 
-Identify the first and last detected ping for each flight X antenna combo  
+Identify the first and last detected ping for each flight X antenna combo.  
+
+Note: using data.table::between is critical here for filtering to just the signals that were detected during one of the drone flights. dplyr::between is apparently not vectorized on the left and right arguments, so it doesn't work correctly across the entire data frame.
 ```{r}
 flight_times_antennae_first_last_ping <- all_tags_tower %>% 
-  full_join(., drone_flight_times_antennae) %>% 
-  filter(between(ts, start.time, end.time)) %>% 
+  full_join(., drone_flight_times_antennae) %>%
+  filter(data.table::between(ts, start.time, end.time)) %>% 
   mutate(ts = ifelse(is.na(ts), start.time, ts),
          ts = as.POSIXct(ts, origin = "1970-01-01")) %>% 
   group_by(drone, date, flight.num, mfg, antBearing) %>% 
@@ -111,9 +116,29 @@ flight_times_antennae_first_last_ping <- all_tags_tower %>%
 # Now on to actual interpolation    
 First the missed leading and trailing pings   
 
+```{r}
+missed_lead_trail <- full_join(flights_antennae_detections, flight_times_antennae_first_last_ping) %>% 
+  mutate(exp.ping.int = ifelse(mfg == "CTT", 14.8, 10.7),
+         missed.lead = as.numeric(difftime(first.ping.ts, start.time, units = "secs"))/exp.ping.int,
+         missed.lead = floor(missed.lead),
+         missed.trail = as.numeric(difftime(end.time, last.ping.ts, units = "secs"))/exp.ping.int,
+         missed.trail = floor(missed.trail))
+
+```
+
 For interpolated lead pings, want to count backward from the first detected ping but don't want to duplicate the first detected ping.  
 
 ```{r}
+interp_lead <- missed_lead_trail %>% 
+  filter(detected.pings > 0, missed.lead > 0) %>% 
+  select(date, mfg, antBearing, drone, flight.num, start.time, first.ping.ts, missed.lead, exp.ping.int) %>%
+  group_by(date, mfg, antBearing, drone, flight.num, start.time, first.ping.ts) %>%
+  complete(missed.lead = full_seq(1:missed.lead, 1)) %>% 
+  mutate(total.missed.lead = max(missed.lead)) %>% 
+  ungroup() %>% 
+  mutate(exp.ping.int = ifelse(mfg == "CTT", 14.8, 10.7),
+         ts = first.ping.ts - ((total.missed.lead - (missed.lead - 1)) * exp.ping.int))
+
 interp_lead <- full_join(flights_antennae_detections, flight_times_antennae_first_last_ping) %>% 
   mutate(exp.ping.int = ifelse(mfg == "CTT", 14.8, 10.7),
          missed.lead = as.numeric(difftime(first.ping.ts, start.time, units = "secs"))/exp.ping.int,
@@ -145,13 +170,13 @@ interp_trail <- full_join(flights_antennae_detections, flight_times_antennae_fir
          ts = last.ping.ts + (missed.trail * exp.ping.int))
 ```
 
-# Next, missed pings between first and last detected ping
+Next, missed pings between first and last detected ping
 
 ```{r}
 missed_middle <- all_tags_tower %>% 
   select(mfg, antBearing, date, ts) %>% 
   full_join(flights_antennae_detections) %>% 
-  filter(between(ts, start.time, end.time)) %>% 
+  filter(data.table::between(ts, start.time, end.time)) %>% 
   arrange(mfg, antBearing, ts) %>% 
   group_by(date, mfg, antBearing, drone, flight.num) %>% 
   mutate(next.ts = lead(ts)) %>%
@@ -201,7 +226,7 @@ Join all those with the records of actually detected pings.
 ```{r}
 all_tags_tower_interp <- all_tags_tower  %>% 
   full_join(flights_antennae_detections) %>% 
-  filter(between(ts, start.time, end.time)) %>% 
+  filter(data.table::between(ts, start.time, end.time)) %>% 
   select(date, ts, drone, flight.num, mfg, antBearing, sig) %>% 
   full_join(select(interp_lead, date, ts, drone, flight.num, mfg, antBearing)) %>% 
   full_join(select(interp_trail, date, ts, drone, flight.num, mfg, antBearing)) %>% 
@@ -223,7 +248,7 @@ We should have close to the same number of pings for each tower within each flig
 all_tags_tower_interp %>% 
   filter(mfg == "CTT") %>% 
   count(date, drone, flight.num, mfg, antBearing) %>% 
-  pivot_wider(id_cols = c(date, drone, mfg, flight.num), names_from = "antBearing", values_from = n)
+  pivot_wider(id_cols = c(date, drone, mfg, flight.num), names_from = "antBearing", values_from = n) %>% view()
 
 # all_tags_tower_interp %>% 
 #   group_by(date, drone, flight.num, mfg, antBearing) %>% 
@@ -234,7 +259,7 @@ all_tags_tower_interp %>%
 
 
 
-# join tag detections with drone telemetry
+Join tag detections with drone telemetry a second time to attribute the interpolated tag pings with a drone location. 
 
 ```{r}
 df <- drone_tele_tags1sec %>% 
@@ -265,7 +290,7 @@ df %>%
   facet_grid(antBearing~as.Date(ts))
 ```
 
-## Calculate distances and angles between towers/antennae and drones.  
+# Calculate distances and angles between towers/antennae and drones.  
 
 First need matrices of UAV locations and tower locations.  
 
@@ -278,13 +303,17 @@ tower.loc <- df %>%
   select(tower.longitude, tower.latitude) %>% 
   data.matrix()
 ```
-Calculate distances:
+
+Calculate distances:  
+
 ```{r}
 ant.tag.dist <- distHaversine(tower.loc, tag.loc) %>% 
   data.frame() %>% 
   rename(ant.tag.distance = 1) 
 ```
-Calculate bearings
+
+Calculate bearings:  
+
 ```{r}
 df_bearings <- bearing(p1 = tower.loc, p2 = tag.loc) %>% 
   data.frame() %>% 
@@ -293,7 +322,8 @@ df_bearings <- bearing(p1 = tower.loc, p2 = tag.loc) %>%
   mutate(tower.tag.bearing = ifelse(tower.tag.bearing < 0, (180 + tower.tag.bearing) + 180, tower.tag.bearing))
 ```
 
-Combine distances and bearings.
+Combine distances and bearings.  
+
 ```{r}
 df_bearings_dist <- df_bearings %>% 
   cbind(df) %>% 
@@ -301,7 +331,8 @@ df_bearings_dist <- df_bearings %>%
 ```
 
 
-Calculate how far off the antenna axis the tag was. Need to convert bearing off antenna axis to 0-180 scale; assuming effect of bearing is equal left and right.
+Calculate how far off the antenna axis the tag was. Need to convert bearing off antenna axis to 0-180 scale; assuming effect of bearing is equal left and right.  
+
 ```{r}
 df_bearings_dist <- df_bearings_dist %>% 
   filter(!is.na(antBearing), !is.na(name)) %>% 
