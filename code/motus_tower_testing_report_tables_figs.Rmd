@@ -1,0 +1,386 @@
+---
+title: ''
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r }
+
+library(tidyverse)
+library(gridExtra)
+library(here)
+library(AICcmodavg)
+library(flextable)
+library(officer)
+library(lubridate)
+library(grid)
+library(ggmap)
+
+# visualize and analyze ----
+
+df_bearings_dist_ctt <- readRDS(here("data/all_pings_distance_bearing")) %>% 
+  filter(mfg == "CTT") %>% 
+  mutate(dist.group = case_when(ant.tag.distance < 2000 & flight.loc != "Walker Creek" ~ "close",
+                                ant.tag.distance > 2000 & flight.loc != "Walker Creek" ~ "far",
+                                flight.loc == "Walker Creek" ~ "Walker Creek"),
+         detected = ifelse(is.na(sig), 0, 1),
+         detected.label = ifelse(is.na(sig), "Interpolated", "Detected"))
+
+```
+
+
+```{r fig.dim = c(7.5, 5)}
+
+zinset <- get_stamenmap(c(left = -126, bottom = 32.5, right = -115, top = 42), zoom = 5, maptype = "toner") %>% 
+  ggmap() +
+  geom_rect(aes(xmin = -123.5, ymin = 37.95, xmax = -122.5, ymax = 38.5), fill = NA, color = "red") +
+    theme(axis.title = element_blank(), 
+          axis.text  = element_blank(),
+          axis.ticks = element_blank(),
+          plot.margin = unit(c(0,0,0,0), "cm"))
+
+
+get_stamenmap(c(left = -123, bottom = 38.15, right = -122.87, top = 38.24), zoom = 12, maptype = "terrain") %>% 
+  ggmap() +
+  annotate(geom = "text", x = -122.925, y = 38.19, label = "Tomales Bay", angle = -45) +
+  annotate(geom = "text", x = -122.96, y = 38.223, label = "Toms Point", hjust = 1.05, vjust = 0) +
+  geom_segment(x = -122.96, xend = -122.95, y = 38.223, yend = 38.219) +
+  annotate(geom = "text", x = -122.92, y = 38.216, label = "Walker Creek", hjust = 0) +
+  geom_segment(x = -122.92, xend = -122.926, y = 38.216, yend = 38.215) +
+  annotate(geom = "text", x = -122.905, y = 38.177, label = "Cypress Grove", hjust = 1.05, vjust = 0) +
+  geom_segment(x = -122.905, xend = -122.9, y = 38.177, yend = 38.17) +
+  geom_path(data = df_bearings_dist_ctt, aes(x = longitude, y = latitude, color = flight.loc)) +
+  geom_point(data = distinct(df_bearings_dist_ctt, name, tower.latitude, tower.longitude), aes(x = tower.longitude, y = tower.latitude, shape = name)) +
+  labs(x = "",
+       y = "",
+       color = "Flight\nlocation",
+       shape = "Tower\nlocation") +
+  inset(ggplotGrob(zinset), xmin = -123, xmax = -122.95, ymin = 38.15, ymax = 38.19) +
+    theme(axis.title = element_blank(), 
+          axis.text  = element_blank(),
+          axis.ticks = element_blank())
+
+
+
+```
+
+```{r}
+
+flight_summ <- readRDS(here("data/drone_flight_times_antennae")) %>% 
+  filter(mfg == "CTT") %>% 
+  mutate(flight.loc = case_when(start.time < "2021-09-14 12:00:00" ~ "Cypress Grove",
+                                start.time > "2021-09-14 12:00:00" & date == "2021-09-14" ~ "Walker Creek",
+                                date == "2021-09-15" ~ "Toms Point"),
+         flight.type = ifelse(flight.height == "high", "P", "M")) %>% 
+  distinct(date, flight.num, flight.type, flight.loc, flight.length)
+
+detect_summary <- df_bearings_dist_ctt %>% 
+  full_join(flight_summ) %>% 
+  count(date, name, flight.type, flight.loc, antBearing, detected.label) %>% 
+  pivot_wider(id_cols = c(date, name, flight.type, flight.loc, antBearing), names_from = "detected.label", values_from = n) %>%
+  mutate(across(c("Interpolated", "Detected"), ~replace_na(.x, 0)),
+         out.col = paste(Detected + Interpolated, " (", Detected, "; ", Interpolated, ")", sep = ""),
+         antenna = paste(name, "; ", round(antBearing, 1), sep = "")) %>% 
+  pivot_wider(id_cols = c(date, flight.type, flight.loc), names_from = "antenna", values_from = out.col)
+
+detec_flight_summary <- flight_summ %>% 
+  group_by(date, flight.type, flight.loc) %>% 
+  summarise(total.flight.time = sum(flight.length)) %>% 
+  ungroup() %>% 
+  full_join(., detect_summary) %>% 
+  arrange(date, flight.loc, desc(flight.type)) %>% 
+  mutate(total.flight.time = total.flight.time/60,
+         total.flight.time = round(total.flight.time, 1),
+         date = paste(month(date), day(date), sep = "-"))
+
+```
+
+Table 1. 
+
+```{r}
+
+detec_flight_summary <- detec_flight_summary %>% 
+  mutate(filler.col1 = "",
+         filler.col2 = "") %>% 
+  select(date, total.flight.time, flight.loc, flight.type, filler.col1, contains("Cypress"), filler.col2, contains("Toms"))
+
+colnames(detec_flight_summary) <- gsub("Cypress Grove; ", "", colnames(detec_flight_summary))
+colnames(detec_flight_summary) <- gsub("Toms Point; ", "", colnames(detec_flight_summary))
+
+flextable(detec_flight_summary) %>% 
+  add_header_row(values = c("", "Flight characteristics", "", "Cypress Grove antennae", "", "Toms Point antennae"), colwidths = c(1, 3, 1, 4, 1, 4)) %>% 
+  set_header_labels(date = "Date",
+                    total.flight.time = "Duration (min)",
+                    flight.loc = "Location",
+                    flight.type = "Type",
+                    filler.col1 = "",
+                    filler.col2 = "") %>% 
+  align(j = 2:ncol(detec_flight_summary), align = "center", part = "all") %>% 
+  border_remove() %>% 
+  border(i = 1, border.top = fp_border(color = "black"), part = "header") %>% 
+  border(i = 2, j = 2:4, border.top = fp_border(color = "black"), part = "header") %>% 
+  border(i = 2, j = 6:9, border.top = fp_border(color = "black"), part = "header") %>% 
+  border(i = 2, j = 11:14, border.top = fp_border(color = "black"), part = "header") %>% 
+  border(i = 1, border.top = fp_border(color = "black"), part = "body") %>% 
+  border(i = nrow(detec_flight_summary), border.bottom = fp_border(color = "black"), part = "body") %>% 
+  width(j = c(1:4), width = 0.7) %>%
+  width(j = c(6:9, 11:14), width = 1) %>% 
+  width(j = c(5, 10), width = 0.1) %>% 
+  fit_to_width(max_width = 8) %>% 
+  fontsize(size = 6, part = "all")
+```
+
+
+Figure 2. 
+
+```{r fig.dim = c(6, 4)}
+
+make_na_label <- function(x.pos = 1.05, y.pos = 0.15)
+{
+  Point <- grid::pointsGrob(x = x.pos, y = y.pos, pch = 19, size = unit(.5, "char"), gp = gpar(col = "red"))
+  Text <-  grid::textGrob(x = x.pos + 0.03, y = y.pos, gp = gpar(fontsize = 10), just = "left", "Interpolated\nsignal")
+  Title <- grid::grobTree(Point, Text)
+}
+
+df_bearings_dist_ctt %>% 
+  filter(dist.group == "close") %>% 
+ggplot() +
+  geom_point(aes(x = tag.ant.bearing.dif, y = ant.tag.distance, color = sig), size = 1) + 
+  scale_color_gradient(na.value = "red") +
+  labs(x = "Tag bearing off antenna axis (deg)",
+       y = "Tag distance from tower (m)",
+       color = "Signal\nstrength",
+       title = "A. Close detections, Toms Point and Cypress Grove flights") +
+  coord_cartesian(xlim = c(0, 180), clip = "off") +
+  theme_bw() +
+  annotation_custom(make_na_label()) +
+  theme(plot.margin = unit(c(1,3,1,1), "lines")) 
+
+df_bearings_dist_ctt %>% 
+  filter(dist.group == "far") %>% 
+ggplot() +
+  geom_point(aes(x = tag.ant.bearing.dif, y = ant.tag.distance, color = sig), size = 1) + 
+  scale_color_gradient(na.value = "red") +
+  labs(x = "Tag bearing off antenna axis (deg)",
+       y = "Tag distance from tower (m)",
+       color = "Signal\nstrength",
+       title = "B. Far detections, Toms Point and Cypress Grove flights") +
+  coord_cartesian(xlim = c(0, 180), clip = "off") +
+  scale_y_continuous(breaks = seq(5000, 8000, by = 500), labels = seq(5000, 8000, by = 500)) +
+  theme_bw() +
+  annotation_custom(make_na_label()) +
+  theme(plot.margin = unit(c(1,3,1,1), "lines")) 
+
+df_bearings_dist_ctt %>% 
+  filter(dist.group == "Walker Creek") %>% 
+ggplot() +
+  geom_point(aes(x = tag.ant.bearing.dif, y = ant.tag.distance, color = sig), size = 1) + 
+  scale_color_gradient(na.value = "red") +
+  labs(x = "Tag bearing off antenna axis (deg)",
+       y = "Tag distance from tower (m)",
+       color = "Signal\nstrength",
+       title = "C. Walker Creek flights") +
+  coord_cartesian(xlim = c(0, 180), clip = "off") +
+  theme_bw() +
+  annotation_custom(make_na_label()) +
+  theme(plot.margin = unit(c(1,3,1,1), "lines")) 
+
+```
+
+```{r}
+# analyze ----
+
+# model selection
+
+model_data <- df_bearings_dist_ctt %>% 
+  full_join(., readRDS(here("data/drone_flight_times_antennae")) %>% 
+              distinct(date, drone, flight.num, flight.height)) %>%
+  filter(flight.loc != "Walker Creek", flight.height == "high") %>% 
+  mutate(tag.ant.bearing.dif.sc = scale(tag.ant.bearing.dif),
+         ant.tag.distance.sc = scale(ant.tag.distance))
+
+sig.str.close <- model_data %>%
+  filter(dist.group == "close", !is.na(sig)) %>%
+  lm(sig ~ ant.tag.distance.sc + tag.ant.bearing.dif.sc, data = .)
+                      
+sig.str.far <- model_data %>%
+  filter(dist.group == "far", !is.na(sig)) %>%
+  lm(sig ~ ant.tag.distance.sc + tag.ant.bearing.dif.sc, data = .)
+
+# 2 chance of detection
+
+detec.close <-  model_data %>%
+  filter(dist.group == "close") %>%
+  glm(detected ~ ant.tag.distance.sc + tag.ant.bearing.dif.sc, data = ., family = binomial)
+
+detec.far <- model_data %>%
+  filter(dist.group == "far") %>%
+  glm(detected ~ ant.tag.distance.sc + tag.ant.bearing.dif.sc, data = ., family = binomial)
+
+```
+
+Table 2. 
+
+```{r}
+# extract coefs and CI
+
+get_ci_coef <- function(mod, mod.name) {
+  ci_coef <- cbind(coef(mod), confint(mod)) %>% 
+    data.frame() %>% 
+    rename(est = 1) %>% 
+    rownames_to_column("coef") %>% 
+    mutate(model = mod.name) %>% 
+    filter(coef != "(Intercept)")
+return(ci_coef)
+  }
+
+all_ci_coef <- map2_df(list(sig.str.close, sig.str.far, detec.close, detec.far), 
+                      list("Signal strength, close", "Signal strength, far", "Detection probability, close", "Detection probability, far"),
+                      get_ci_coef) %>% 
+  data.frame() %>% 
+  mutate(coef = case_when(coef == "ant.tag.distance.sc" ~ "Distance",
+                          coef == "tag.ant.bearing.dif.sc" ~ "Bearing"),
+         across(c("est", "X2.5..", "X97.5.."), ~round(.x, 2)),
+         model = ifelse(coef == "Distance", model, "")) %>% 
+  select(model, coef, est, X2.5.., X97.5..)
+
+flextable(all_ci_coef) %>% 
+  set_header_labels("model" = "Data subset",
+                    "coef" = "Coefficient",
+                    "est" = "Estimate",
+                    "X2.5.." = "lower",
+                    "X97.5.." = "upper") %>% 
+  add_header_row(values = c("", "95% Confidence Interval"), colwidths = c(3, 2)) %>% 
+  border_remove() %>% 
+  border(i = 1, border.top = fp_border(color = "black"), part = "header") %>% 
+  border(i = 1, j = 4:5, border.bottom = fp_border(color = "black"), part = "header") %>% 
+  border(i = 1, border.top = fp_border(color = "black"), part = "body") %>% 
+  border(i = c(2, 4, 6), border.bottom = fp_border(color = "black"), part = "body") %>% 
+  border(i = nrow(all_ci_coef), border.bottom = fp_border(color = "black"), part = "body") %>% 
+  width(j = 1, width = 2) %>% 
+  width(j = 2:5, width = 1) %>% 
+  align(j = 3:5, align = "center", part = "all")
+
+```
+
+
+
+```{r}
+# model estimates for probability of detection
+
+sig.str.close <- model_data %>%
+  filter(dist.group == "close", !is.na(sig)) %>%
+  lm(sig ~ ant.tag.distance + tag.ant.bearing.dif, data = .)
+                      
+sig.str.far <- model_data %>%
+  filter(dist.group == "far", !is.na(sig)) %>%
+  lm(sig ~ ant.tag.distance + tag.ant.bearing.dif, data = .)
+
+# 2 chance of detection
+
+detec.close <-  model_data %>%
+  filter(dist.group == "close") %>%
+  glm(detected ~ ant.tag.distance + tag.ant.bearing.dif, data = ., family = binomial)
+
+detec.far <- model_data %>%
+  filter(dist.group == "far") %>%
+  glm(detected ~ ant.tag.distance + tag.ant.bearing.dif, data = ., family = binomial)
+
+# close and far newdats
+close_newdat <- expand.grid(ant.tag.distance = seq(min(filter(model_data, dist.group == "close")$ant.tag.distance),
+                                                   max(filter(model_data, dist.group == "close")$ant.tag.distance),
+                                                   length.out = 100),
+                            tag.ant.bearing.dif = seq(0, 180, length.out = 100))%>% 
+  mutate(tag.ant.bearing.dif.sc = scale(tag.ant.bearing.dif),
+         ant.tag.distance.sc = scale(ant.tag.distance))
+
+far_newdat <- expand.grid(ant.tag.distance = seq(min(filter(model_data, dist.group == "far")$ant.tag.distance),
+                                                 max(filter(model_data, dist.group == "far")$ant.tag.distance),
+                                                 length.out = 100),
+                          tag.ant.bearing.dif = seq(0, 180, length.out = 100))%>% 
+  mutate(tag.ant.bearing.dif.sc = scale(tag.ant.bearing.dif),
+         ant.tag.distance.sc = scale(ant.tag.distance))
+
+# signal strength predictions
+# close
+sig.str.close_pred <- predict(sig.str.close, close_newdat) %>% 
+  cbind(close_newdat) %>% 
+  rename(sig.str = 1) 
+# far
+sig.str.far_pred <- predict(sig.str.far, far_newdat) %>% 
+  cbind(far_newdat) %>% 
+  rename(sig.str = 1)
+
+# detection probability predictions
+# close
+detec.close_pred <- predict.glm(detec.close, close_newdat, type = "response") %>% 
+  cbind(close_newdat) %>% 
+  rename(detec.prob = 1)
+
+# far
+detec.far_pred <- predict.glm(detec.far, far_newdat, type = "response") %>% 
+  cbind(far_newdat) %>% 
+  rename(detec.prob = 1)
+
+```
+  
+Figure 3. 
+
+```{r}
+# plots
+ggplot() +
+  geom_contour_filled(data = sig.str.close_pred, aes(tag.ant.bearing.dif, ant.tag.distance, z = sig.str), binwidth = 10) +
+  labs(x = "",
+       y = "Tag distance from tower (m)",
+       title = "A. Signal strength, close") +
+  scale_fill_brewer(palette = "Blues", name = "Predicted\nsignal\nstrength", direction=-1, guide = guide_legend(reverse = TRUE)) +
+  theme_bw() +
+  coord_polar() +
+  scale_x_continuous(limits = c(0,360), breaks = seq(0, 180, by = 30), labels = seq(0, 180, by = 30))
+```
+
+```{r}
+ggplot() +
+  geom_contour_filled(data = sig.str.far_pred, aes(tag.ant.bearing.dif, ant.tag.distance, z = sig.str), binwidth = 10) +
+  labs(x = "",
+       y = "Tag distance from tower (m)",
+       title = "B. Signal strength, far") +
+  scale_fill_manual(values = c("#08519C", "#3182BD", "#6BAED6"), name = "Predicted\nsignal\nstrength", guide = guide_legend(reverse = TRUE)) +
+  theme_bw() +
+  coord_polar() +
+  scale_x_continuous(limits = c(0,360), breaks = seq(0, 180, by = 30), labels = seq(0, 180, by = 30)) +
+  scale_y_continuous(limits = c(0, max(sig.str.far_pred$ant.tag.distance * 1.1), breaks = seq(0, max(sig.str.far_pred$ant.tag.distance * 1.1), by = 1000), labels = seq(0, max(sig.str.far_pred$ant.tag.distance * 1.1), by = 1000)))
+```
+
+```{r}
+
+ggplot() +
+  geom_contour_filled(data = detec.close_pred, aes(tag.ant.bearing.dif, ant.tag.distance, z = detec.prob), bins = 9) +
+  coord_polar() +
+  scale_x_continuous(limits = c(0,360), breaks = seq(0, 180, by = 30), labels = seq(0, 180, by = 30)) +
+  labs(x = "",
+       y = "Tag distance from tower (m)",
+       title = "C. Detection probability, close") +
+  scale_fill_brewer(palette = "BuPu", name = "Predicted\nprobability\nof tag\ndetection", guide = guide_legend(reverse = TRUE)) +
+   scale_color_manual(values = c("black", "red")) +
+  theme_bw()
+
+```
+
+```{r}
+ggplot() +
+  geom_contour_filled(data = detec.far_pred, aes(tag.ant.bearing.dif, ant.tag.distance, z = detec.prob)) +
+  coord_polar() +
+  scale_x_continuous(limits = c(0,360), breaks = seq(0, 180, by = 30), labels = seq(0, 180, by = 30)) +
+  scale_y_continuous(limits = c(0, max(sig.str.far_pred$ant.tag.distance * 1.1), breaks = seq(0, max(sig.str.far_pred$ant.tag.distance * 1.1), by = 1000), labels = seq(0, max(sig.str.far_pred$ant.tag.distance * 1.1), by = 1000))) +
+  labs(x = "",
+       y = "Tag distance from tower (m)",
+       title = "D. Detection probability, far") +
+  scale_fill_brewer(palette = "PuOr", name = "Predicted\nprobability\nof tag\ndetection", guide = guide_legend(reverse = TRUE)) +
+   scale_color_manual(values = c("black", "red")) +
+  theme_bw()
+```
+
