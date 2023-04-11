@@ -1,26 +1,19 @@
 library(tidyverse)
-library(xml2)
-#library(DBI)
-#library(RSQLite)
 library(lubridate)
 library(data.table)
-#library(plotKML)
+library(plotKML)
+library(here)
 
 #Read in GPS path - CHANGE NAME
-GPS <- readGPX("./Tracks/Node_test_10-25-22.gpx")
-GPSTrack <- as.data.frame(GPS$tracks)
-colnames(GPSTrack)<-gsub(".10.25.22.","",colnames(GPSTrack))
-colnames(GPSTrack)<-gsub("Node.test","",colnames(GPSTrack))
-GPSTrack$time <- chartr("T", " ", GPSTrack$time)
-GPSTrack$time <- chartr("Z", " ", GPSTrack$time)
+GPSTrack <- readGPX("./Tracks/Node_test_10-25-22.gpx")$tracks %>% 
+  as.data.frame() %>% 
+  rename("longitude" = 1, "latitude" = 2, "ele" = 3, "GPStime" = 4) %>%
+  select(-ele) %>% 
+  mutate(GPStime = gsub("T|Z", " ", GPStime),
+         GPStime = ymd_hms(GPStime),
+         gps.time.key = GPStime)
+  
 
-GPSTrack <- GPSTrack%>%
-  mutate(GPStime = (ymd_hms(GPSTrack$time)),
-         GPStimekey = (ymd_hms(GPSTrack$time)),
-         latitude = lat,
-         longitude = lon,
-         elevation = ele) %>%
-  select(GPStimekey, GPStime, latitude, longitude, elevation)
 
 #CHANGE THE TIMES
 DeplBegin <- as.POSIXct("10/25/2022 15:36", format="%m/%d/%Y %H:%M")
@@ -35,7 +28,7 @@ Node365F7E <- as.data.frame(read.csv("./10_25_Nodes/365F7E/beep_0.csv")) %>%
 Node3650EC <- as.data.frame(read.csv("./10_25_Nodes/3650EC/beep_0.csv")) %>%
   mutate(NodeID = "3650EC",
          LatNode = as.numeric("38.168975"),
-         LonNode = as.numeric("--122.901905"))
+         LonNode = as.numeric("-122.901905"))
 
 Node364588 <- as.data.frame(read.csv("./10_25_Nodes/364588/beep_0.csv")) %>%
   mutate(NodeID = "364588",
@@ -53,71 +46,37 @@ Node364DC3 <- as.data.frame(read.csv("./10_25_Nodes/364DC3/beep_0.csv")) %>%
          LonNode = as.numeric("-122.900389"))
 
 #Merge node dataframes, remove extra characters, append locations
-DetectionsAllNodes <- rbind(Node365F7E, Node3650EC, Node364588, Node365099, Node364DC3)
-DetectionsAllNodes$time <- chartr("T", " ", DetectionsAllNodes$time)
-DetectionsAllNodes$time <- chartr("Z", " ", DetectionsAllNodes$time)
 
-unique(DetectionsAllNodes$id)
-
-DetectionsAllNodesFiltStrict <- DetectionsAllNodes %>%
-  filter(id %in% c("66341907", "4B2A1E4C", "524B1EE6"),
-         time >= DeplBegin)
-
-DetectionsAllNodesFilt <- DetectionsAllNodes %>%
-  filter(id %in% c("6634190794", "66341907", "66349907","66341987","66B41907",
-                   "4B2A1E4CB7", "4B2A1E4C", "4BAA1E4C", "4BAA1ECC", "4B2A1ECC","4B2A9ECC","CBAA1E4C","CB2A1E4C",
-                   "524B1E660E", "524B1EE6","52CB1E66", "D24B1E66", "524B9E66"),
-         time >= DeplBegin) %>%
-  mutate(tsNode = as.POSIXct(time),
-         tsNodeRef= tsNode,
-         Signal = rssi,
-         Tag = if_else(id == "6634190794", "66341907",
-              if_else(id == "66341907", "66341907",
-              if_else(id == "66349907", "66341907",
-              if_else(id == "66341987", "66341907",
-              if_else(id == "66B41907", "66341907",
-              if_else(id == "4B2A1E4CB7", "4B2A1E4C",
-              if_else(id == "4B2A1E4C", "4B2A1E4C",
-              if_else(id == "4BAA1E4C", "4B2A1E4C",
-              if_else(id == "4BAA1ECC", "4B2A1E4C",
-              if_else(id == "4B2A1ECC", "4B2A1E4C",
-              if_else(id == "4B2A9ECC", "4B2A1E4C",
-              if_else(id == "CBAA1E4C", "4B2A1E4C",
-              if_else(id == "CB2A1E4C", "4B2A1E4C",
-              if_else(id == "52CB1E66", "524B1E66",
-              if_else(id == "524B9E66", "524B1E66",
-              if_else(id == "D24B1E66", "524B1E66",
-              if_else(id == "524B1E660E", "524B1E66", "524B1E66")))))))))))))))))) %>%
-  select(tsNode, NodeID, Signal, Tag, LatNode, LonNode, tsNodeRef)
+DetectionsAllNodesFilt <- rbind(Node365F7E, Node3650EC, Node364588, Node365099, Node364DC3) %>% 
+  right_join(read.csv(here("data/tagID_fixer.csv"))) %>% # instead of long nested ifelse, just do a right join with a csv that contains a column for the bad tag IDs and a column for the good ones
+  mutate(time = gsub("T|Z", " ", time)) %>% # instead of the 2 chartr() calls
+  filter(time >= DeplBegin) %>% 
+  mutate(time = as.POSIXct(time, tz = "UTC"),
+         node.time.key = time) %>% 
+  rename("Signal" = rssi,
+         "node.time" = time)
 
 
 #Join GPS points to node file
 NodeDT <- data.table(DetectionsAllNodesFilt)
 GPSDT <- data.table(GPSTrack)
 
-setkey(NodeDT, tsNodeRef)
-setkey(GPSDT, GPStimekey)
+
+setkey(NodeDT, node.time.key)
+setkey(GPSDT, gps.time.key)
 
 DetectionsCombined <- GPSDT[NodeDT, roll = "nearest" ]
 DetectionsCombinedFiltered <- DetectionsCombined %>%
-  mutate(tsdiff = (GPStimekey-tsNode),
-         GPStime = GPStimekey) %>%
-  filter(tsdiff >= -.5, tsdiff <= .5) %>%
-  select(GPStimekey, tsNode, tsdiff, latitude, longitude, elevation, NodeID, Signal, Tag, LatNode, LonNode)
-
-setkey(GPSDT, GPStimekey)
-setkey(DetectionsCombinedFiltered, GPStimekey)
-AttemptedStupidFix <- DetectionsCombinedFiltered[GPSDT, roll = "nearest" ]
+  filter(abs(GPStime-node.time) <= 1) #changed this to 1 second (from 0.5) because I really wasn't paddling all that fast!
 
 
 
-write.csv(DetectionsCombinedFiltered, file = "./MatchedDetections10_25.csv")
+write.csv(DetectionsCombinedFiltered, file = here("data/node_data/MatchedDetections20221025.csv"))
 
-#to dataframe for ggplotery
-Testing <- as.data.frame(DetectionsCombinedFiltered)
-library(ggplot2)
 
-ggplot(Testing) +
-  geom_point(mapping=aes(x=i.longitude, y=i.latitude, color=Signal, shape=Tag)) +
+DetectionsCombinedFiltered %>% 
+  data.frame() %>% 
+ggplot() +
+  geom_point(aes(x=longitude, y=latitude, color=Signal, shape=Tag)) +
 #geom_point(mapping=aes(x=LonNode, y=LatNode, size=5)) +
   facet_wrap(~ NodeID)
