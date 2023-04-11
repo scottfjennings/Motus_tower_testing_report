@@ -50,7 +50,7 @@ head(drone_tele_tags1sec)
 
 ```{r}
 all_tags_tower <- readRDS(here("data/combined_by_tower")) %>% 
-  select(ts, sig, motusTagID, recv, antBearing, date, mfg)
+  select(ts, sig, motusTagID, recv, antBearing, date, mfg, port)
 
 ```
 
